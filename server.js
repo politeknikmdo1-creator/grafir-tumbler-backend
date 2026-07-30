@@ -543,6 +543,13 @@ app.delete("/antrian/:id", (req, res) => {
 
 
 /* ================= SERVER ================= */
+app.get("/", (req, res) => {
+  res.json({
+    success: true,
+    message: "Backend Grafir Tumbler berjalan",
+    status: "Online",
+  });
+});
 
 const PORT = process.env.PORT || 8000;
 
