@@ -1,36 +1,17 @@
-const mysql = require("mysql2");
+const { Pool } = require("pg");
 
-// =========================
-// DEBUG ENV
-// =========================
 console.log("=================================");
 console.log("DATABASE ENVIRONMENT VARIABLES");
 console.log("=================================");
-console.log("DB_HOST     :", process.env.DB_HOST);
-console.log("DB_USER     :", process.env.DB_USER);
-console.log(
-  "DB_PASSWORD :",
-  process.env.DB_PASSWORD ? "ADA" : "KOSONG"
-);
-console.log("DB_NAME     :", process.env.DB_NAME);
-console.log("DB_PORT     :", process.env.DB_PORT);
+console.log("DATABASE_URL ADA?:", process.env.DATABASE_URL ? "ADA" : "KOSONG");
 console.log("=================================");
 
-// =========================
-// KONEKSI DATABASE
-// =========================
-const db = mysql.createConnection({
-  host: process.env.DB_HOST,
-  user: process.env.DB_USER,
-  password: process.env.DB_PASSWORD,
-  database: process.env.DB_NAME,
-  port: Number(process.env.DB_PORT) || 3306,
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  ssl: { rejectUnauthorized: false },
 });
 
-// =========================
-// CONNECT
-// =========================
-db.connect((err) => {
+pool.connect((err, client, release) => {
   if (err) {
     console.log("=================================");
     console.log("KONEKSI DATABASE GAGAL");
@@ -40,7 +21,26 @@ db.connect((err) => {
     console.log("=================================");
     console.log("DATABASE BERHASIL TERHUBUNG");
     console.log("=================================");
+    release();
   }
 });
 
-module.exports = db;
+// Wrapper supaya cara pakainya mirip mysql2: db.query(sql, params, callback)
+const db = {
+  query: (sql, paramsOrCallback, callback) => {
+    let params = [];
+    let cb = paramsOrCallback;
+
+    if (typeof paramsOrCallback !== "function") {
+      params = paramsOrCallback || [];
+      cb = callback;
+    }
+
+    pool.query(sql, params, (err, result) => {
+      if (err) return cb(err);
+      cb(null, result.rows);
+    });
+  },
+};
+
+module.exports = { pool, db };

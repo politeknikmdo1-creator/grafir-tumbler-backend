@@ -3,7 +3,7 @@ const express = require("express");
 const cors = require("cors");
 const fs = require("fs");
 const path = require("path");
-const db = require("./db");
+const { db } = require("./db");
 
 const app = express();
 
@@ -18,14 +18,12 @@ if (!fs.existsSync(uploadDir)) {
 }
 
 // supaya file di /uploads bisa diakses lewat browser
-// contoh: http://localhost:8000/uploads/template_123.png
 app.use("/uploads", express.static(uploadDir));
 
 /* ================= HELPER: simpan base64 jadi file ================= */
 const saveBase64Image = (base64String, prefix = "img") => {
   if (!base64String) return "";
 
-  // buang header "data:image/png;base64," kalau ada
   const matches = base64String.match(/^data:image\/(\w+);base64,(.+)$/);
 
   let ext = "png";
@@ -41,7 +39,6 @@ const saveBase64Image = (base64String, prefix = "img") => {
 
   fs.writeFileSync(filePath, data, "base64");
 
-  // ini yang disimpan ke kolom file_path (bukan gambar mentahnya)
   return `/uploads/${fileName}`;
 };
 
@@ -50,8 +47,7 @@ const saveBase64Image = (base64String, prefix = "img") => {
 app.post("/login", (req, res) => {
   const { username, password } = req.body;
 
-  const sql =
-    "SELECT * FROM admin WHERE BINARY username=? AND BINARY password=?";
+  const sql = "SELECT * FROM admin WHERE username=$1 AND password=$2";
 
   db.query(sql, [username, password], (err, result) => {
     if (err) {
@@ -81,7 +77,7 @@ app.post("/login", (req, res) => {
 app.get("/status_mesin", (req, res) => {
   const sql = "SELECT * FROM status_mesin WHERE id=1";
 
-  db.query(sql, (err, result) => {
+  db.query(sql, [], (err, result) => {
     if (err) {
       console.log("GET STATUS MESIN ERROR:", err);
       return res.status(500).json({});
@@ -108,7 +104,7 @@ app.post("/status_mesin", (req, res) => {
     });
   }
 
-  const sql = "UPDATE status_mesin SET kontrol_mesin=? WHERE id=1";
+  const sql = "UPDATE status_mesin SET kontrol_mesin=$1 WHERE id=1";
 
   db.query(sql, [kontrolMesin], (err) => {
     if (err) {
@@ -151,7 +147,7 @@ app.post("/sensor_mesin", (req, res) => {
     });
   }
 
-  const sql = "UPDATE status_mesin SET power=?, status=? WHERE id=1";
+  const sql = "UPDATE status_mesin SET power=$1, status=$2 WHERE id=1";
 
   db.query(sql, [power, status], (err) => {
     if (err) {
@@ -181,7 +177,7 @@ app.post("/status_proses", (req, res) => {
     });
   }
 
-  const sql = "UPDATE status_mesin SET status=? WHERE id=1";
+  const sql = "UPDATE status_mesin SET status=$1 WHERE id=1";
 
   db.query(sql, [status], (err) => {
     if (err) {
@@ -204,7 +200,7 @@ app.post("/status_proses", (req, res) => {
 app.get("/templates", (req, res) => {
   const sql = "SELECT * FROM templates ORDER BY id DESC";
 
-  db.query(sql, (err, result) => {
+  db.query(sql, [], (err, result) => {
     if (err) {
       console.log("GET TEMPLATES ERROR:", err);
       return res.status(500).json([]);
@@ -219,7 +215,7 @@ app.post("/templates", (req, res) => {
     name,
     text_value,
     design_json,
-    preview_image, // base64 dari frontend, BUKAN yang disimpan langsung ke DB
+    preview_image,
     font_size,
     pos_x,
     pos_y,
@@ -273,7 +269,6 @@ app.post("/templates", (req, res) => {
     });
   }
 
-  // === decode base64 preview jadi file, simpan pathnya ke file_path ===
   const finalFilePath = saveBase64Image(finalPreviewBase64, "template");
 
   const sql = `
@@ -296,14 +291,15 @@ app.post("/templates", (req, res) => {
       logo_height,
       design_json
     )
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
+    RETURNING id
   `;
 
   db.query(
     sql,
     [
       name,
-      finalFilePath, // <-- di sini path gambar preview disimpan
+      finalFilePath,
       finalText,
       finalFontSize,
       finalRotation,
@@ -324,14 +320,14 @@ app.post("/templates", (req, res) => {
         console.log("POST TEMPLATES ERROR:", err);
         return res.status(500).json({
           success: false,
-          message: err.sqlMessage || "Template gagal disimpan",
+          message: err.message || "Template gagal disimpan",
         });
       }
 
       res.json({
         success: true,
         message: "Template berhasil disimpan",
-        id: result.insertId,
+        id: result[0].id,
         file_path: finalFilePath,
       });
     }
@@ -341,14 +337,13 @@ app.post("/templates", (req, res) => {
 app.delete("/templates/:id", (req, res) => {
   const id = req.params.id;
 
-  // ambil dulu file_path-nya supaya file lama bisa dihapus dari disk
-  db.query("SELECT file_path FROM templates WHERE id=?", [id], (err, rows) => {
+  db.query("SELECT file_path FROM templates WHERE id=$1", [id], (err, rows) => {
     if (!err && rows.length > 0 && rows[0].file_path) {
       const filePath = path.join(__dirname, rows[0].file_path);
-      fs.unlink(filePath, () => {}); // abaikan kalau gagal/tidak ada
+      fs.unlink(filePath, () => {});
     }
 
-    db.query("DELETE FROM templates WHERE id=?", [id], (err2) => {
+    db.query("DELETE FROM templates WHERE id=$1", [id], (err2) => {
       if (err2) {
         console.log("DELETE TEMPLATE ERROR:", err2);
         return res.status(500).json({
@@ -374,7 +369,7 @@ app.get("/antrian", (req, res) => {
     ORDER BY id DESC
   `;
 
-  db.query(sql, (err, result) => {
+  db.query(sql, [], (err, result) => {
     if (err) {
       console.log("GET ANTRIAN ERROR:", err);
       return res.status(500).json([]);
@@ -443,7 +438,8 @@ app.post("/antrian", (req, res) => {
       box_height,
       status
     )
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+    RETURNING id
   `;
 
   db.query(
@@ -466,14 +462,14 @@ app.post("/antrian", (req, res) => {
         console.log("POST ANTRIAN ERROR:", err);
         return res.status(500).json({
           success: false,
-          message: err.sqlMessage || "Design gagal masuk antrian",
+          message: err.message || "Design gagal masuk antrian",
         });
       }
 
       res.json({
         success: true,
         message: "Design berhasil masuk antrian",
-        id: result.insertId,
+        id: result[0].id,
       });
     }
   );
@@ -482,7 +478,7 @@ app.post("/antrian", (req, res) => {
 app.put("/antrian/:id/proses", (req, res) => {
   const id = req.params.id;
 
-  const sql = "UPDATE antrian SET status='proses' WHERE id=?";
+  const sql = "UPDATE antrian SET status='proses' WHERE id=$1";
 
   db.query(sql, [id], (err) => {
     if (err) {
@@ -503,7 +499,7 @@ app.put("/antrian/:id/proses", (req, res) => {
 app.put("/antrian/:id/selesai", (req, res) => {
   const id = req.params.id;
 
-  const sql = "UPDATE antrian SET status='selesai' WHERE id=?";
+  const sql = "UPDATE antrian SET status='selesai' WHERE id=$1";
 
   db.query(sql, [id], (err) => {
     if (err) {
@@ -524,7 +520,7 @@ app.put("/antrian/:id/selesai", (req, res) => {
 app.delete("/antrian/:id", (req, res) => {
   const id = req.params.id;
 
-  db.query("DELETE FROM antrian WHERE id=?", [id], (err) => {
+  db.query("DELETE FROM antrian WHERE id=$1", [id], (err) => {
     if (err) {
       console.log("DELETE ANTRIAN ERROR:", err);
       return res.status(500).json({
@@ -539,8 +535,6 @@ app.delete("/antrian/:id", (req, res) => {
     });
   });
 });
-
-
 
 /* ================= SERVER ================= */
 app.get("/", (req, res) => {
