@@ -321,18 +321,21 @@ app.delete("/templates/:id", (req, res) => {
 });
 /* ================= ANTRIAN ================= */
 app.get("/antrian", (req, res) => {
- const sql = `
- SELECT *
- FROM antrian
- ORDER BY id DESC
- `;
- db.query(sql, [], (err, result) => {
- if (err) {
- console.log("GET ANTRIAN ERROR:", err);
- return res.status(500).json([]);
- }
- res.json(result);
- });
+  const sql = `
+    SELECT *
+    FROM antrian
+    WHERE status IN ('menunggu', 'proses')
+    ORDER BY id DESC
+  `;
+
+  db.query(sql, [], (err, result) => {
+    if (err) {
+      console.log("GET ANTRIAN ERROR:", err);
+      return res.status(500).json([]);
+    }
+
+    res.json(result);
+  });
 });
 app.post("/antrian", (req, res) => {
  const {
