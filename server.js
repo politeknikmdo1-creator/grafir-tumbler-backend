@@ -57,82 +57,110 @@ app.post("/login", (req, res) => {
 });
 /* ================= STATUS MESIN ================= */
 app.get("/status_mesin", (req, res) => {
- // Dashboard membaca data electrical terakhir yang dikirim ESP32/PZEM
- // melalui API PHP dan tersimpan di PostgreSQL.
- //
- // API PHP hanya menyimpan data mentah.
- // Penentuan Idle/Running dilakukan di backend Node.
- const sql = `
- SELECT
- id,
- CASE
- WHEN kontrol_mesin = 'on' THEN 1
- ELSE 0
- END AS switch,
- voltage,
- current_amp AS current,
- power_watt AS power,
- updated_at
- FROM status_mesin
- WHERE id = 1
- LIMIT 1
- `;
- db.query(sql, [], (err, result) => {
- if (err) {
- console.log("GET STATUS MESIN ERROR:", err);
- return res.status(500).json({
- switch: 0,
- voltage: 0,
- current: 0,
- power: 0,
- machine_status: "Idle",
- updated_at: null,
- });
- }
- const row = result[0];
- if (!row) {
- return res.json({
- switch: 0,
- voltage: 0,
- current: 0,
- power: 0,
- machine_status: "Idle",
- updated_at: null,
- });
- }
- const switchValue = Number(row.switch ?? 0);
- const voltage = Number(row.voltage ?? 0);
- const current = Number(row.current ?? 0);
- const power = Number(row.power ?? 0);
- // Threshold awal untuk menentukan mesin sedang bekerja.
- // Nilai final nanti dikalibrasi dari data PZEM mesin asli.
- // Bisa diubah lewat Environment Variables di Render:
- // RUNNING_CURRENT_THRESHOLD=0.05
- // RUNNING_POWER_THRESHOLD=5
- const runningCurrentThreshold = Number(
- process.env.RUNNING_CURRENT_THRESHOLD ?? 0.05
- );
- const runningPowerThreshold = Number(
- process.env.RUNNING_POWER_THRESHOLD ?? 5
- );
- const machineStatus =
- switchValue === 1 &&
- (
- current >= runningCurrentThreshold ||
- power >= runningPowerThreshold
- )
- ? "Running"
- : "Idle";
- return res.json({
- id: row.id,
- switch: switchValue,
- voltage,
- current,
- power,
- machine_status: machineStatus,
- updated_at: row.updated_at,
- });
- });
+  const sql = `
+    SELECT
+      id,
+      CASE
+        WHEN kontrol_mesin = 'on' THEN 1
+        ELSE 0
+      END AS switch,
+      voltage,
+      current_amp AS current,
+      power_watt AS power,
+      updated_at
+    FROM status_mesin
+    WHERE id = 1
+    LIMIT 1
+  `;
+
+  db.query(sql, [], (err, result) => {
+    if (err) {
+      console.log("GET STATUS MESIN ERROR:", err);
+
+      return res.status(500).json({
+        switch: 0,
+        voltage: 0,
+        current: 0,
+        power: 0,
+        machine_status: "Idle",
+        sensor_online: false,
+        data_age_seconds: null,
+        updated_at: null,
+      });
+    }
+
+    const row = result[0];
+
+    if (!row) {
+      return res.json({
+        switch: 0,
+        voltage: 0,
+        current: 0,
+        power: 0,
+        machine_status: "Idle",
+        sensor_online: false,
+        data_age_seconds: null,
+        updated_at: null,
+      });
+    }
+
+    const switchValue = Number(row.switch ?? 0);
+    const voltage = Number(row.voltage ?? 0);
+    const current = Number(row.current ?? 0);
+    const power = Number(row.power ?? 0);
+
+    const runningCurrentThreshold = Number(
+      process.env.RUNNING_CURRENT_THRESHOLD ?? 0.05
+    );
+
+    const runningPowerThreshold = Number(
+      process.env.RUNNING_POWER_THRESHOLD ?? 5
+    );
+
+    const staleTimeoutSeconds = Number(
+      process.env.PZEM_STALE_TIMEOUT_SECONDS ?? 10
+    );
+
+    const updatedAtMs = row.updated_at
+      ? new Date(row.updated_at).getTime()
+      : 0;
+
+    const nowMs = Date.now();
+
+    const dataAgeSeconds =
+      updatedAtMs > 0
+        ? Math.max(
+            0,
+            Math.floor((nowMs - updatedAtMs) / 1000)
+          )
+        : null;
+
+    const sensorOnline =
+      dataAgeSeconds !== null &&
+      dataAgeSeconds <= staleTimeoutSeconds;
+
+    const machineStatus =
+      sensorOnline &&
+      switchValue === 1 &&
+      (
+        current >= runningCurrentThreshold ||
+        power >= runningPowerThreshold
+      )
+        ? "Running"
+        : "Idle";
+
+    return res.json({
+      id: row.id,
+      switch: switchValue,
+      voltage,
+      current,
+      power,
+      machine_status: machineStatus,
+      sensor_online: sensorOnline,
+      data_age_seconds: dataAgeSeconds,
+      updated_at: row.updated_at,
+    });
+  });
 });
 app.post("/status_mesin", (req, res) => {
  // Endpoint backend web ini hanya mengubah perintah switch ON/OFF.
