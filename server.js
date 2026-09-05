@@ -57,110 +57,96 @@ app.post("/login", (req, res) => {
 });
 /* ================= STATUS MESIN ================= */
 app.get("/status_mesin", (req, res) => {
-  const sql = `
-    SELECT
-      id,
-      CASE
-        WHEN kontrol_mesin = 'on' THEN 1
-        ELSE 0
-      END AS switch,
-      voltage,
-      current_amp AS current,
-      power_watt AS power,
-      updated_at
-    FROM status_mesin
-    WHERE id = 1
-    LIMIT 1
-  `;
-
-  db.query(sql, [], (err, result) => {
-    if (err) {
-      console.log("GET STATUS MESIN ERROR:", err);
-
-      return res.status(500).json({
-        switch: 0,
-        voltage: 0,
-        current: 0,
-        power: 0,
-        machine_status: "Idle",
-        sensor_online: false,
-        data_age_seconds: null,
-        updated_at: null,
-      });
-    }
-
-    const row = result[0];
-
-    if (!row) {
-      return res.json({
-        switch: 0,
-        voltage: 0,
-        current: 0,
-        power: 0,
-        machine_status: "Idle",
-        sensor_online: false,
-        data_age_seconds: null,
-        updated_at: null,
-      });
-    }
-
-    const switchValue = Number(row.switch ?? 0);
-    const voltage = Number(row.voltage ?? 0);
-    const current = Number(row.current ?? 0);
-    const power = Number(row.power ?? 0);
-
-    const runningCurrentThreshold = Number(
-      process.env.RUNNING_CURRENT_THRESHOLD ?? 0.05
-    );
-
-    const runningPowerThreshold = Number(
-      process.env.RUNNING_POWER_THRESHOLD ?? 5
-    );
-
-    const staleTimeoutSeconds = Number(
-      process.env.PZEM_STALE_TIMEOUT_SECONDS ?? 10
-    );
-
-    const updatedAtMs = row.updated_at
-      ? new Date(row.updated_at).getTime()
-      : 0;
-
-    const nowMs = Date.now();
-
-    const dataAgeSeconds =
-      updatedAtMs > 0
-        ? Math.max(
-            0,
-            Math.floor((nowMs - updatedAtMs) / 1000)
-          )
-        : null;
-
-    const sensorOnline =
-      dataAgeSeconds !== null &&
-      dataAgeSeconds <= staleTimeoutSeconds;
-
-    const machineStatus =
-      sensorOnline &&
-      switchValue === 1 &&
-      (
-        current >= runningCurrentThreshold ||
-        power >= runningPowerThreshold
-      )
-        ? "Running"
-        : "Idle";
-
-    return res.json({
-      id: row.id,
-      switch: switchValue,
-      voltage,
-      current,
-      power,
-      machine_status: machineStatus,
-      sensor_online: sensorOnline,
-      data_age_seconds: dataAgeSeconds,
-      updated_at: row.updated_at,
-    });
-  });
+ const sql = `
+ SELECT
+ id,
+ CASE
+ WHEN kontrol_mesin = 'on' THEN 1
+ ELSE 0
+ END AS switch,
+ voltage,
+ current_amp AS current,
+ power_watt AS power,
+ updated_at
+ FROM status_mesin
+ WHERE id = 1
+ LIMIT 1
+ `;
+ db.query(sql, [], (err, result) => {
+ if (err) {
+ console.log("GET STATUS MESIN ERROR:", err);
+ return res.status(500).json({
+ switch: 0,
+ voltage: 0,
+ current: 0,
+ power: 0,
+ machine_status: "Idle",
+ sensor_online: false,
+ data_age_seconds: null,
+ updated_at: null,
+ });
+ }
+ const row = result[0];
+ if (!row) {
+ return res.json({
+ switch: 0,
+ voltage: 0,
+ current: 0,
+ power: 0,
+ machine_status: "Idle",
+ sensor_online: false,
+ data_age_seconds: null,
+ updated_at: null,
+ });
+ }
+ const switchValue = Number(row.switch ?? 0);
+ const voltage = Number(row.voltage ?? 0);
+ const current = Number(row.current ?? 0);
+ const power = Number(row.power ?? 0);
+ const runningCurrentThreshold = Number(
+ process.env.RUNNING_CURRENT_THRESHOLD ?? 0.05
+ );
+ const runningPowerThreshold = Number(
+ process.env.RUNNING_POWER_THRESHOLD ?? 5
+ );
+ const staleTimeoutSeconds = Number(
+ process.env.PZEM_STALE_TIMEOUT_SECONDS ?? 10
+ );
+ const updatedAtMs = row.updated_at
+ ? new Date(row.updated_at).getTime()
+ : 0;
+ const nowMs = Date.now();
+ const dataAgeSeconds =
+ updatedAtMs > 0
+ ? Math.max(
+ 0,
+ Math.floor((nowMs - updatedAtMs) / 1000)
+ )
+ : null;
+ const sensorOnline =
+ dataAgeSeconds !== null &&
+ dataAgeSeconds <= staleTimeoutSeconds;
+ const machineStatus =
+ sensorOnline &&
+ switchValue === 1 &&
+ (
+ current >= runningCurrentThreshold ||
+ power >= runningPowerThreshold
+ )
+ ? "Running"
+ : "Idle";
+ return res.json({
+ id: row.id,
+ switch: switchValue,
+ voltage,
+ current,
+ power,
+ machine_status: machineStatus,
+ sensor_online: sensorOnline,
+ data_age_seconds: dataAgeSeconds,
+ updated_at: row.updated_at,
+ });
+ });
 });
 app.post("/status_mesin", (req, res) => {
  // Endpoint backend web ini hanya mengubah perintah switch ON/OFF.
@@ -349,25 +335,50 @@ app.delete("/templates/:id", (req, res) => {
 });
 /* ================= ANTRIAN ================= */
 app.get("/antrian", (req, res) => {
-  const sql = `
-    SELECT *
-    FROM antrian
-    WHERE status IN ('menunggu', 'proses')
-    ORDER BY id DESC
-  `;
-
-  db.query(sql, [], (err, result) => {
-    if (err) {
-      console.log("GET ANTRIAN ERROR:", err);
-      return res.status(500).json([]);
-    }
-
-    res.json(result);
-  });
+ const sql = `
+ SELECT
+ a.*,
+ ROW_NUMBER() OVER (
+ ORDER BY
+ CASE
+ WHEN a.status IN ('persiapan', 'proses') THEN 0
+ ELSE 1
+ END,
+ a.created_at ASC,
+ a.id ASC
+ ) AS queue_position,
+ CASE
+ WHEN a.started_at IS NULL THEN 0
+ ELSE FLOOR(
+ EXTRACT(
+ EPOCH FROM (
+ COALESCE(a.finished_at, NOW()) - a.started_at
+ )
+ )
+ )::BIGINT
+ END AS runtime_seconds
+ FROM antrian a
+ WHERE a.status IN ('menunggu', 'persiapan', 'proses')
+ ORDER BY
+ CASE
+ WHEN a.status IN ('persiapan', 'proses') THEN 0
+ ELSE 1
+ END,
+ a.created_at ASC,
+ a.id ASC
+ `;
+ db.query(sql, [], (err, result) => {
+ if (err) {
+ console.log("GET ANTRIAN ERROR:", err);
+ return res.status(500).json([]);
+ }
+ return res.json(result);
+ });
 });
 app.post("/antrian", (req, res) => {
  const {
  template_id,
+ machine_id,
  name,
  text,
  design_json,
@@ -377,7 +388,7 @@ app.post("/antrian", (req, res) => {
  pos_y,
  box_width,
  box_height,
- status,
+ machineId,
  designJson,
  fontSize,
  posX,
@@ -392,6 +403,7 @@ app.post("/antrian", (req, res) => {
  const finalPosY = pos_y ?? posY ?? 100;
  const finalBoxWidth = box_width ?? boxWidth ?? 120;
  const finalBoxHeight = box_height ?? boxHeight ?? 50;
+ const finalMachineId = Number(machine_id ?? machineId ?? 1);
  if (!name) {
  return res.status(400).json({
  success: false,
@@ -404,10 +416,17 @@ app.post("/antrian", (req, res) => {
  message: "Design JSON kosong",
  });
  }
+ if (!Number.isInteger(finalMachineId) || finalMachineId < 1) {
+ return res.status(400).json({
+ success: false,
+ message: "ID mesin tidak valid",
+ });
+ }
  const sql = `
  INSERT INTO antrian
  (
  template_id,
+ machine_id,
  name,
  text,
  design_json,
@@ -419,13 +438,14 @@ app.post("/antrian", (req, res) => {
  box_height,
  status
  )
- VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+ VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
  RETURNING id
  `;
  db.query(
  sql,
  [
  template_id || null,
+ finalMachineId,
  name,
  text || "",
  finalDesignJson,
@@ -435,7 +455,7 @@ app.post("/antrian", (req, res) => {
  finalPosY,
  finalBoxWidth,
  finalBoxHeight,
- status || "menunggu",
+ "menunggu",
  ],
  (err, result) => {
  if (err) {
@@ -445,10 +465,12 @@ app.post("/antrian", (req, res) => {
  message: err.message || "Design gagal masuk antrian",
  });
  }
- res.json({
+ return res.json({
  success: true,
  message: "Design berhasil masuk antrian",
  id: result[0].id,
+ machine_id: finalMachineId,
+ status: "menunggu",
  });
  }
  );
@@ -456,19 +478,26 @@ app.post("/antrian", (req, res) => {
 const startAntrianJob = (req, res) => {
  const id = Number(req.params.id);
  if (!Number.isInteger(id) || id < 1) {
- return res.status(400).json({ success: false, message: "ID job tidak valid" });
+ return res.status(400).json({
+ success: false,
+ message: "ID job tidak valid",
+ });
  }
- // Hanya satu job boleh berstatus proses. Partial unique index di PostgreSQL
- // menjadi pengaman kedua jika dua tombol Start ditekan hampir bersamaan.
  const sql = `
  UPDATE antrian
- SET status='proses'
- WHERE id=$1
- AND status='menunggu'
+ SET
+ status = 'persiapan',
+ machine_id = COALESCE(machine_id, 1),
+ started_at = COALESCE(started_at, NOW())
+ WHERE id = $1
+ AND status = 'menunggu'
  AND NOT EXISTS (
- SELECT 1 FROM antrian WHERE status='proses'
+ SELECT 1
+ FROM antrian
+ WHERE id <> $1
+ AND status IN ('persiapan', 'proses')
  )
- RETURNING id
+ RETURNING id, machine_id, status, started_at
  `;
  db.query(sql, [id], (err, result) => {
  if (err) {
@@ -476,28 +505,71 @@ const startAntrianJob = (req, res) => {
  if (err.code === "23505") {
  return res.status(409).json({
  success: false,
- message: "Masih ada job yang sedang diproses. Antrian lain terkunci.",
+ message: "Masih ada job aktif. Antrian lain terkunci.",
  });
  }
- return res.status(500).json({ success: false, message: "Gagal memulai job" });
+ return res.status(500).json({
+ success: false,
+ message: "Gagal memulai job",
+ });
  }
  if (!result || result.length === 0) {
  return res.status(409).json({
  success: false,
- message: "Job tidak dapat dimulai karena ada job aktif atau status job bukan Menunggu.",
+ message:
+ "Job tidak dapat dimulai karena ada job aktif atau status job bukan Menunggu.",
  });
  }
  return res.json({
  success: true,
- message: "Job berhasil dimulai. Antrian lain sekarang terkunci.",
- id,
- status: "proses",
+ message: "Job masuk tahap Persiapan. Runtime mulai dihitung.",
+ id: result[0].id,
+ machine_id: result[0].machine_id,
+ status: "persiapan",
+ started_at: result[0].started_at,
  });
  });
 };
 app.put("/antrian/:id/start", startAntrianJob);
-// Route lama dipertahankan untuk kompatibilitas, tetapi memakai lock yang sama.
-app.put("/antrian/:id/proses", startAntrianJob);
+app.put("/antrian/:id/proses", (req, res) => {
+ const id = Number(req.params.id);
+ if (!Number.isInteger(id) || id < 1) {
+ return res.status(400).json({
+ success: false,
+ message: "ID job tidak valid",
+ });
+ }
+ const sql = `
+ UPDATE antrian
+ SET status = 'proses'
+ WHERE id = $1
+ AND status = 'persiapan'
+ RETURNING id, machine_id, status, started_at
+ `;
+ db.query(sql, [id], (err, result) => {
+ if (err) {
+ console.log("UPDATE PROSES ERROR:", err);
+ return res.status(500).json({
+ success: false,
+ message: "Status job gagal diubah menjadi Sedang diproses",
+ });
+ }
+ if (!result || result.length === 0) {
+ return res.status(409).json({
+ success: false,
+ message: "Job harus berstatus Persiapan sebelum masuk tahap proses.",
+ });
+ }
+ return res.json({
+ success: true,
+ message: "Mesin mulai bekerja. Status menjadi Sedang diproses.",
+ id: result[0].id,
+ machine_id: result[0].machine_id,
+ status: "proses",
+ started_at: result[0].started_at,
+ });
+ });
+});
 app.put("/antrian/:id/selesai", (req, res) => {
  const id = Number(req.params.id);
  if (!Number.isInteger(id) || id < 1) {
@@ -506,7 +578,7 @@ app.put("/antrian/:id/selesai", (req, res) => {
  message: "ID job tidak valid",
  });
  }
- // Requirement final:
+ // Untuk sementara requirement lama dipertahankan:
  // ketika proses grafir selesai, job langsung dihapus dari antrian.
  const sql = `
  DELETE FROM antrian
@@ -544,7 +616,7 @@ app.delete("/antrian/:id", (req, res) => {
  message: "Antrian gagal dihapus",
  });
  }
- res.json({
+ return res.json({
  success: true,
  message: "Antrian berhasil dihapus",
  });
