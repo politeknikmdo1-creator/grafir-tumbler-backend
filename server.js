@@ -488,7 +488,7 @@ const startAntrianJob = (req, res) => {
  SET
  status = 'persiapan',
  machine_id = COALESCE(machine_id, 1),
- started_at = COALESCE(started_at, NOW())
+ started_at = NULL
  WHERE id = $1
  AND status = 'menunggu'
  AND NOT EXISTS (
@@ -522,7 +522,7 @@ const startAntrianJob = (req, res) => {
  }
  return res.json({
  success: true,
- message: "Job masuk tahap Persiapan. Runtime mulai dihitung.",
+ message: "Job masuk tahap Persiapan. Runtime belum dimulai.",
  id: result[0].id,
  machine_id: result[0].machine_id,
  status: "persiapan",
@@ -541,7 +541,9 @@ app.put("/antrian/:id/proses", (req, res) => {
  }
  const sql = `
  UPDATE antrian
- SET status = 'proses'
+ SET
+ status = 'proses',
+ started_at = COALESCE(started_at, NOW())
  WHERE id = $1
  AND status = 'persiapan'
  RETURNING id, machine_id, status, started_at
@@ -562,7 +564,7 @@ app.put("/antrian/:id/proses", (req, res) => {
  }
  return res.json({
  success: true,
- message: "Mesin mulai bekerja. Status menjadi Sedang diproses.",
+ message: "Mesin mulai bekerja. Status menjadi Sedang diproses dan runtime mulai dihitung.",
  id: result[0].id,
  machine_id: result[0].machine_id,
  status: "proses",
