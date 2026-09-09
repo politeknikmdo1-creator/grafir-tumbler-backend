@@ -580,25 +580,107 @@ app.put("/antrian/:id/selesai", (req, res) => {
  message: "ID job tidak valid",
  });
  }
- // Untuk sementara requirement lama dipertahankan:
- // ketika proses grafir selesai, job langsung dihapus dari antrian.
+ // Endpoint dan response tetap sama.
+ // Perubahan hanya pada proses internal:
+ // simpan ke riwayat_kerja terlebih dahulu, lalu hapus dari antrian.
  const sql = `
- DELETE FROM antrian
+ WITH job AS (
+ SELECT
+ id,
+ template_id,
+ machine_id,
+ name,
+ text,
+ design_json,
+ font_size,
+ rotation,
+ pos_x,
+ pos_y,
+ box_width,
+ box_height,
+ created_at,
+ started_at
+ FROM antrian
  WHERE id = $1
- RETURNING id
+ AND status = 'proses'
+ ),
+ archived AS (
+ INSERT INTO riwayat_kerja (
+ job_id,
+ template_id,
+ machine_id,
+ name,
+ text,
+ design_json,
+ font_size,
+ rotation,
+ pos_x,
+ pos_y,
+ box_width,
+ box_height,
+ queued_at,
+ started_at,
+ finished_at,
+ runtime_seconds,
+ status
+ )
+ SELECT
+ id,
+ template_id,
+ COALESCE(machine_id, 1),
+ name,
+ text,
+ design_json,
+ font_size,
+ rotation,
+ pos_x,
+ pos_y,
+ box_width,
+ box_height,
+ created_at,
+ started_at,
+ NOW(),
+ CASE
+ WHEN started_at IS NULL THEN 0
+ ELSE GREATEST(
+ 0,
+ FLOOR(EXTRACT(EPOCH FROM (NOW() - started_at)))::INTEGER
+ )
+ END,
+ 'selesai'
+ FROM job
+ ON CONFLICT (job_id) DO NOTHING
+ RETURNING job_id
+ ),
+ deleted AS (
+ DELETE FROM antrian a
+ USING job j
+ WHERE a.id = j.id
+ AND (
+ EXISTS (SELECT 1 FROM archived)
+ OR EXISTS (
+ SELECT 1
+ FROM riwayat_kerja r
+ WHERE r.job_id = j.id
+ )
+ )
+ RETURNING a.id
+ )
+ SELECT id
+ FROM deleted
  `;
  db.query(sql, [id], (err, result) => {
  if (err) {
- console.log("DELETE JOB SELESAI ERROR:", err);
+ console.log("SELESAI + RIWAYAT KERJA ERROR:", err);
  return res.status(500).json({
  success: false,
- message: "Job selesai gagal dihapus dari antrian",
+ message: "Job selesai gagal diproses",
  });
  }
  if (!result || result.length === 0) {
  return res.status(404).json({
  success: false,
- message: "Job tidak ditemukan",
+ message: "Job tidak ditemukan atau belum berstatus Sedang diproses",
  });
  }
  return res.json({
