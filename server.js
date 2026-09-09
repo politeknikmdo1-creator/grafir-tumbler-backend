@@ -624,6 +624,40 @@ app.delete("/antrian/:id", (req, res) => {
  });
  });
 });
+/* ================= RIWAYAT KERJA ================= */
+app.get("/riwayat-kerja", (req, res) => {
+ const sql = `
+ SELECT
+ id,
+ job_id,
+ template_id,
+ machine_id,
+ name,
+ text,
+ design_json,
+ font_size,
+ rotation,
+ pos_x,
+ pos_y,
+ box_width,
+ box_height,
+ queued_at,
+ started_at,
+ finished_at,
+ runtime_seconds,
+ status,
+ created_at
+ FROM riwayat_kerja
+ ORDER BY finished_at DESC, id DESC
+ `;
+ db.query(sql, [], (err, result) => {
+ if (err) {
+ console.log("GET RIWAYAT KERJA ERROR:", err);
+ return res.status(500).json([]);
+ }
+ return res.json(result);
+ });
+});
 /* ================= SERVER ================= */
 app.get("/", (req, res) => {
  res.json({
